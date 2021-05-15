@@ -112,14 +112,24 @@ struct State {
   uint64_t wtb_used = 0;
   size_t wtb_used_count = 0;
   size_t depth = 0;
-  ResourceID max_allowed = 0;
+  uint64_t allowed_mask = 1; // {gold}
+
+  INL bool is_allowed(ResourceID res) const { return (allowed_mask>>res)&1; }
+  INL void update_allowed(ResourceID a, ResourceID b) {
+    auto m = ~((1ull<<std::max(a,b))-1);
+    allowed_mask = (m&allowed_mask)|(1ull<<a)|(1ull<<b);
+  }
 
   friend str show(const State &s) {
     str wtb_used_bits = "";
     for(size_t i=0; i<s.S.wtb_offers; i++) wtb_used_bits += ((s.wtb_used>>i)&1) ? '1' : '0';
+
+    str allowed_mask_bits = "";
+    for(size_t i=0; i<s.S.names.size(); i++) allowed_mask_bits += ((s.allowed_mask>>i)&1) ? '1' : '0';
+
     vec<str> res;
     for(auto x : s.resources_avail) res.push_back(util::to_str(x));
-    return util::fmt("{ depth = %; wtb_used = %; resources = {%} }",s.depth,wtb_used_bits,util::join(",",res));
+    return util::fmt("{ depth = %; allowed_mask = %; wtb_used = %; resources = {%} }",s.depth,allowed_mask_bits,wtb_used_bits,util::join(",",res));
   }
 
   struct Transaction {
@@ -129,11 +139,11 @@ struct State {
     
     Units t;
     bool is_gold;
-    ResourceID prev_max_allowed;
+    uint64_t prev_allowed_mask;
 
     INL operator bool(){ return ok; }
     INL Transaction(State &_s, const Graph::Edge &_e) : s(_s), e(_e) {
-      if(e.from.res>s.max_allowed && e.to.res>s.max_allowed) return;
+      if(!s.is_allowed(e.from.res) && !s.is_allowed(e.to.res)) return;
       auto got = s.resources_avail[e.from.res];
       if(got<e.from.units) return;
       is_gold = (e.to.res==s.S.gold_id);
@@ -146,8 +156,8 @@ struct State {
         s.wtb_used_count++;
       }
       s.depth++;
-      prev_max_allowed = s.max_allowed;
-      s.max_allowed = std::max(e.from.res,e.to.res);
+      prev_allowed_mask = s.allowed_mask;
+      s.update_allowed(e.from.res,e.to.res);
       s.resources_avail[e.to.res] += e.to.units*t;
       s.resources_avail[e.from.res] -= e.from.units*t;
     }
@@ -158,7 +168,7 @@ struct State {
         s.wtb_used_count--;
       }
       s.depth--;
-      s.max_allowed = prev_max_allowed;
+      s.allowed_mask = prev_allowed_mask;
       s.resources_avail[e.to.res] -= e.to.units*t;
       s.resources_avail[e.from.res] += e.from.units*t; 
     }
@@ -181,7 +191,7 @@ struct DFS {
       best = state.wtb_used_count;
       info("% % transactions done %",state.wtb_used,state.wtb_used_count,show(state));
     }
-    if(state.depth>depth_limit) return;
+    if(state.depth>state.wtb_used_count*3+3) return;
     auto &trans_nodes = state.S.trans.nodes;
     for(size_t i=state.resources_avail.size();i--;) {
       auto got = state.resources_avail[i];
@@ -205,8 +215,9 @@ int main() {
   util::info("{ % }",util::join(", ",nodes));
   */
 
-  DFS dfs(S,60);
+  DFS dfs(S,80);
   dfs.run();
+  info("done");
 
   return 0;
 }
