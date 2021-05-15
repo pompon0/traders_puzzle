@@ -112,6 +112,7 @@ struct State {
   uint64_t wtb_used = 0;
   size_t wtb_used_count = 0;
   size_t depth = 0;
+  ResourceID max_allowed = 0;
 
   friend str show(const State &s) {
     str wtb_used_bits = "";
@@ -124,32 +125,40 @@ struct State {
   struct Transaction {
     State &s;
     const Graph::Edge &e;
-    Units t = 0;
-    bool wtb;
-    INL operator bool(){ return t; }
+    bool ok = 0;
+    
+    Units t;
+    bool is_gold;
+    ResourceID prev_max_allowed;
+
+    INL operator bool(){ return ok; }
     INL Transaction(State &_s, const Graph::Edge &_e) : s(_s), e(_e) {
-      s.depth++;
+      if(e.from.res>s.max_allowed && e.to.res>s.max_allowed) return;
       auto got = s.resources_avail[e.from.res];
       if(got<e.from.units) return;
-      if((wtb = (e.to.res==s.S.gold_id))) {
-        if(s.wtb_used&(1ull<<e.offer)) return;
+      is_gold = (e.to.res==s.S.gold_id);
+      t = is_gold ? !bool(s.wtb_used&(1ull<<e.offer)) : got/e.from.units;
+      if(!t) return;
+
+      ok = 1;
+      if(is_gold) {
         s.wtb_used |= 1ull<<e.offer;
         s.wtb_used_count++;
-        t = 1;
-        //info("set bit % (%)",e.offer,s.wtb_used);
-      } else {
-        t = got/e.from.units;
       }
+      s.depth++;
+      prev_max_allowed = s.max_allowed;
+      s.max_allowed = std::max(e.from.res,e.to.res);
       s.resources_avail[e.to.res] += e.to.units*t;
       s.resources_avail[e.from.res] -= e.from.units*t;
     }
     INL ~Transaction() {
-      s.depth--;
-      if(!t) return;
-      if(wtb) {
+      if(!ok) return;
+      if(is_gold) {
         s.wtb_used &= ~(1ull<<e.offer);
         s.wtb_used_count--;
       }
+      s.depth--;
+      s.max_allowed = prev_max_allowed;
       s.resources_avail[e.to.res] -= e.to.units*t;
       s.resources_avail[e.from.res] += e.from.units*t; 
     }
@@ -180,7 +189,7 @@ struct DFS {
       for(auto &e : trans_nodes[i].out) {
         State::Transaction T(state,e);
         if(!T) continue;
-        //info("WTS %",show(e));
+        //info("%",show(e));
         run();
       }
     }
@@ -196,11 +205,8 @@ int main() {
   util::info("{ % }",util::join(", ",nodes));
   */
 
-  for(size_t i=100;i<104; i++) {
-    info("depth_limit = %",i);
-    DFS dfs(S,i);
-    dfs.run();
-  }
+  DFS dfs(S,60);
+  dfs.run();
 
   return 0;
 }
