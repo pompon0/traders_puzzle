@@ -5,6 +5,7 @@
 #include <bit>
 #include <map>
 #include <iostream>
+#include <queue>
 
 using ResourceID = uint64_t;
 using OfferID = size_t;
@@ -62,6 +63,33 @@ struct Graph {
     return res;
   }
 
+  struct Dist {
+    ResourceID res;
+    uint64_t dist;
+    Units mod;
+    bool operator<(const Dist &b) const {
+      if(dist!=b.dist){ return dist>b.dist; }
+      return mod<b.mod;
+    }
+  };
+  vec<Dist> dij(ResourceID root) const {
+    std::priority_queue<Dist> Q;
+    vec<Dist> D(nodes.size());
+    vec<bool> V(nodes.size(),0);
+    Q.push({root,1});
+    while(Q.size()) {
+      auto d = Q.top(); Q.pop();
+      if(V[d.res]) continue;
+      V[d.res] = 1;
+      D[d.res] = d;
+      for(auto &e : nodes[d.res].out) {
+        auto m = d.mod ? d.mod : e.from.units;
+        Q.push({e.to.res,d.dist*e.from.units,m});
+      }
+    }
+    return D;
+  }
+
   Graph op() const {
     Graph G = *this;
     for(auto &n : G.nodes){
@@ -109,7 +137,7 @@ static Spec make_spec() {
 struct State {
   const Spec &S;
   vec<uint64_t> resources_avail;
-  uint64_t wtb_used = 0;
+  uint64_t wtb_used = 7766969575;
   size_t wtb_used_count = 0;
   size_t depth = 0;
   uint64_t allowed_mask = 1; // {gold}
@@ -129,7 +157,7 @@ struct State {
 
     vec<str> res;
     for(auto x : s.resources_avail) res.push_back(util::to_str(x));
-    return util::fmt("{ depth = %; allowed_mask = %; wtb_used = %; resources = {%} }",s.depth,allowed_mask_bits,wtb_used_bits,util::join(",",res));
+    return util::fmt("{ depth = %; allowed_mask = %; wtb_used = (%) %; resources = {%} }",s.depth,allowed_mask_bits,s.wtb_used,wtb_used_bits,util::join(",",res));
   }
 
   struct Transaction {
@@ -143,7 +171,7 @@ struct State {
 
     INL operator bool(){ return ok; }
     INL Transaction(State &_s, const Graph::Edge &_e) : s(_s), e(_e) {
-      if(!s.is_allowed(e.from.res) && !s.is_allowed(e.to.res)) return;
+      //if(!s.is_allowed(e.from.res) && !s.is_allowed(e.to.res)) return;
       auto got = s.resources_avail[e.from.res];
       if(got<e.from.units) return;
       is_gold = (e.to.res==s.S.gold_id);
@@ -177,8 +205,9 @@ struct State {
 
 struct DFS {
   DFS(const Spec &_S, size_t _depth_limit) : state{_S}, depth_limit(_depth_limit) {
-    state.resources_avail.resize(_S.names.size(),0);
-    state.resources_avail[_S.gold_id] = 10;
+    state.resources_avail = {125,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,1,0,0,0};
+    //state.resources_avail.resize(_S.names.size(),0);
+    //state.resources_avail[_S.gold_id] = 125;
   }
   State state;
   
@@ -191,7 +220,7 @@ struct DFS {
       best = state.wtb_used_count;
       info("% % transactions done %",state.wtb_used,state.wtb_used_count,show(state));
     }
-    if(state.depth>state.wtb_used_count*3+3) return;
+    if(state.depth>state.wtb_used_count*4+7) return;
     auto &trans_nodes = state.S.trans.nodes;
     for(size_t i=state.resources_avail.size();i--;) {
       auto got = state.resources_avail[i];
@@ -206,9 +235,25 @@ struct DFS {
   }
 };
 
+
+
 int main() {
   util::StreamLogger _(std::cerr);
   Spec S = make_spec();
+
+  /*auto D = S.trans.dij(S.gold_id);
+  Graph G;
+  G.nodes.resize(S.names.size());
+  for(auto &e : S.trans.nodes[S.gold_id].in) {
+    auto from_units = D[e.from.res].dist*e.from.units;
+    auto to_units = e.to.units;
+    G.add(Graph::Edge{
+      .from = {.res = S.gold_id, .units = from_units},
+      .to = {.res = S.gold_id, .units = to_units},
+      .offer = e.offer,
+    });
+    info("%(%) -> %",from_units,D[e.from.res].mod,to_units);
+  }*/
 
   /*vec<str> nodes;
   for(auto n : S.wts.op().topo()) nodes.push_back(S.names.lookup_name(n));
